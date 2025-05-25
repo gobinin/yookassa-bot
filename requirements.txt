@@ -1,2 +1,4 @@
-aiogram==3.20.0.post0
-python-dotenv
+pyTelegramBotAPI==4.14.0
+yookassa
+requests
+python-dotenv 
