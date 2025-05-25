@@ -1,8 +1,10 @@
-
 import asyncio
 import logging
 import uuid
+import os
 import requests
+
+from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
@@ -12,6 +14,7 @@ from config import BOT_TOKEN, SHOP_ID, SECRET_KEY
 
 logging.basicConfig(level=logging.INFO)
 
+# === Бот ===
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
@@ -23,16 +26,14 @@ products = {
 }
 
 def product_keyboard():
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{v['name']} – {v['price']}₽", callback_data=k)]
         for k, v in products.items()
     ])
-    return kb
 
 @router.message(CommandStart())
 @router.message()
 async def greet_user(message: Message):
-    logging.info(f"Received message: {message.text}")
     await message.answer(
         "👋 Приветствуем в вашем цифровом магазине!\n\n"
         "Выберите товар для покупки:",
@@ -49,10 +50,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
         return
 
     payment_data = {
-        "amount": {
-            "value": f"{product['price']:.2f}",
-            "currency": "RUB"
-        },
+        "amount": {"value": f"{product['price']:.2f}", "currency": "RUB"},
         "confirmation": {
             "type": "redirect",
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
@@ -78,14 +76,29 @@ async def handle_product_selection(callback: types.CallbackQuery):
         )
         await callback.answer()
     else:
-        await callback.message.answer("❌ Ошибка при создании оплаты. Попробуйте позже.")
+        await callback.message.answer("❌ Ошибка при создании оплаты.")
         await callback.answer()
 
 dp.include_router(router)
 
-async def main():
-    logging.info("Bot is polling...")
-    await dp.start_polling(bot)
+# === Webhook обработчик ===
+async def yookassa_webhook_handler(request):
+    data = await request.json()
+    logging.info("📩 Уведомление от ЮKassa: %s", data)
+    return web.Response(text="ok")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def create_app():
+    app = web.Application()
+    app.router.add_post("/yookassa-webhook", yookassa_webhook_handler)
+    return app
+
+# === Главная точка запуска ===
+async def on_startup(app):
+    asyncio.create_task(dp.start_polling(bot))
+
+if _name_ == "_main_":
+    app = create_app()
+    app.on_startup.append(on_startup)
+
+    port = int(os.environ.get("PORT", 8080))  # Render подставит переменную PORT
+    web.run_app(app, port=port)
