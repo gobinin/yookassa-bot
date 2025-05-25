@@ -1,24 +1,24 @@
-import asyncio
 import logging
 import uuid
 import os
+import asyncio
 import requests
+from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
+from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
-from aiogram.client.default import DefaultBotProperties
-from aiohttp import web
 from config import BOT_TOKEN, SHOP_ID, SECRET_KEY
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера
+# Бот и диспетчер
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
 
-# Продукты
+# Товары
 products = {
     "bot_course": {"name": "Курс: Как создать бота", "price": 199},
     "pdf_guide": {"name": "PDF-инструкция", "price": 99},
@@ -27,24 +27,22 @@ products = {
 
 # Клавиатура
 def product_keyboard():
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{v['name']} – {v['price']}₽", callback_data=k)]
         for k, v in products.items()
     ])
-    return kb
 
-# Обработка команды /start
+# Обработка команд
 @router.message(CommandStart())
 @router.message()
 async def greet_user(message: Message):
-    logging.info(f"Получено сообщение: {message.text}")
     await message.answer(
         "👋 Приветствуем в вашем цифровом магазине!\n\n"
         "Выберите товар для покупки:",
         reply_markup=product_keyboard()
     )
 
-# Обработка выбора товара
+# Обработка кнопок
 @router.callback_query()
 async def handle_product_selection(callback: types.CallbackQuery):
     product_id = callback.data
@@ -78,38 +76,42 @@ async def handle_product_selection(callback: types.CallbackQuery):
     )
 
     if response.status_code == 200:
-        payment_url = response.json()["confirmation"]["confirmation_url"]
+        url = response.json()["confirmation"]["confirmation_url"]
         await callback.message.answer(
-            f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{payment_url}"
+            f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
         )
-        await callback.answer()
     else:
-        await callback.message.answer("❌ Ошибка при создании оплаты. Попробуйте позже.")
-        await callback.answer()
+        await callback.message.answer("❌ Ошибка при создании оплаты.")
+    await callback.answer()
 
 dp.include_router(router)
 
-# Webhook для ЮKassa
+# Webhook ЮKassa
 async def yookassa_webhook_handler(request):
     data = await request.json()
     logging.info(f"📩 Уведомление от ЮKassa: {data}")
     return web.Response(text="ok")
 
-# Настройка aiohttp-приложения
-def setup_webhook_app():
+# aiohttp-приложение
+def setup_web_app():
     app = web.Application()
     app.router.add_post("/yookassa-webhook", yookassa_webhook_handler)
     return app
 
-# Главный запуск
-async def main():
-    logging.info("✅ Запуск aiohttp-сервера и Telegram-бота")
-    app = setup_webhook_app()
-    loop = asyncio.get_event_loop()
-    loop.create_task(dp.start_polling(bot))
-    
-    port = int(os.getenv("PORT", 3000))  # Render обычно подставляет свой порт
-    web.run_app(app, port=port)
+# Основной запуск
+async def start():
+    port = int(os.getenv("PORT", 3000))  # Render подставит свой порт
+    app = setup_web_app()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # Параллельный запуск бота и сервера
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    logging.info("✅ Сервер запущен, бот работает.")
+    await dp.start_polling(bot)
+
+# Запуск (без asyncio.run, безопасно для Windows)
+loop = asyncio.get_event_loop()
+loop.run_until_complete(start())
