@@ -96,7 +96,7 @@ def create_app():
 async def on_startup(app):
     asyncio.create_task(dp.start_polling(bot))
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app = create_app()
     app.on_startup.append(on_startup)
 
