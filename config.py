@@ -1,8 +1,10 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # загружает переменные из .env файла (если запускаешь локально)
+# Загружаем переменные окружения из .env-файла
+load_dotenv()
 
+# Получаем значения переменных
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SHOP_ID = os.getenv("SHOP_ID")
 SECRET_KEY = os.getenv("SECRET_KEY")
