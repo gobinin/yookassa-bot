@@ -16,7 +16,6 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
 
-# Важно: подключаем роутер к диспетчеру, чтобы обработчики сработали
 dp.include_router(router)
 
 products = {
@@ -74,7 +73,6 @@ async def handle_product_selection(callback: types.CallbackQuery):
         }
     )
 
-    # YooKassa возвращает статус 201 при успешном создании платежа
     if response.status_code == 201:
         url = response.json()["confirmation"]["confirmation_url"]
         await callback.message.answer(
@@ -100,14 +98,22 @@ async def root_handler(request):
 async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
+
+        if not isinstance(data, dict) or not data:
+            logging.warning("Пустой или некорректный JSON получен от Telegram")
+            return web.Response(text="empty or invalid update")
+
+        logging.info(f"Получено обновление (type={type(data)}): {data}")
+
         update = types.Update(**data)
         await dp.feed_update(bot, update)
+
     except Exception as e:
-        logging.error(f"Ошибка обработки обновления: {e}")
+        logging.error(f"Ошибка обработки обновления: {e}", exc_info=True)
     return web.Response(text="ok")
 
 async def on_startup(app):
-    webhook_url = os.getenv("WEBHOOK_URL")  # Должен быть задан в переменных окружения
+    webhook_url = os.getenv("WEBHOOK_URL")
     if not webhook_url:
         logging.error("WEBHOOK_URL не задан в переменных окружения")
         return
