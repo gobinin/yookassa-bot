@@ -69,14 +69,16 @@ async def handle_product_selection(callback: types.CallbackQuery):
         }
     )
 
-if response.status_code == 200:
-    url = response.json()["confirmation"]["confirmation_url"]
-    await callback.message.answer(
-        f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
-    )
-else:
-    logging.error(f"Ошибка от ЮKassa: {response.status_code} — {response.text}")
-    await callback.message.answer(f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}")
+    if response.status_code == 200:
+        url = response.json()["confirmation"]["confirmation_url"]
+        await callback.message.answer(
+            f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
+        )
+    else:
+        logging.error(f"Ошибка от ЮKassa: {response.status_code} — {response.text}")
+        await callback.message.answer(
+            f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}"
+        )
     await callback.answer()
 
 dp.include_router(router)
@@ -95,13 +97,13 @@ async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
         update = types.Update(**data)
-        await dp.feed_update(bot, update)  # <-- Важно: правильный вызов
+        await dp.feed_update(bot, update)
     except Exception as e:
         logging.error(f"Ошибка обработки обновления: {e}")
     return web.Response(text="ok")
 
 async def on_startup(app):
-    webhook_url = os.getenv("WEBHOOK_URL")  # https://yourdomain.com/webhook
+    webhook_url = os.getenv("WEBHOOK_URL")
     if not webhook_url:
         logging.error("WEBHOOK_URL не задан в переменных окружения")
         return
