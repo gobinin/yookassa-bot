@@ -69,13 +69,14 @@ async def handle_product_selection(callback: types.CallbackQuery):
         }
     )
 
-    if response.status_code == 200:
-        url = response.json()["confirmation"]["confirmation_url"]
-        await callback.message.answer(
-            f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
-        )
-    else:
-        await callback.message.answer("❌ Ошибка при создании оплаты.")
+if response.status_code == 200:
+    url = response.json()["confirmation"]["confirmation_url"]
+    await callback.message.answer(
+        f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
+    )
+else:
+    logging.error(f"Ошибка от ЮKassa: {response.status_code} — {response.text}")
+    await callback.message.answer(f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}")
     await callback.answer()
 
 dp.include_router(router)
