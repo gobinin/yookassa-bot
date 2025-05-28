@@ -10,29 +10,24 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from config import BOT_TOKEN, SHOP_ID, SECRET_KEY
 
-# Логирование
 logging.basicConfig(level=logging.INFO)
 
-# Бот и диспетчер
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
 
-# Товары
 products = {
     "bot_course": {"name": "Курс: Как создать бота", "price": 199},
     "pdf_guide": {"name": "PDF-инструкция", "price": 99},
     "combo": {"name": "Пакет: Курс + Гайд", "price": 249},
 }
 
-# Клавиатура
 def product_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{v['name']} – {v['price']}₽", callback_data=k)]
         for k, v in products.items()
     ])
 
-# Обработка команд
 @router.message(CommandStart())
 @router.message()
 async def greet_user(message: Message):
@@ -42,7 +37,6 @@ async def greet_user(message: Message):
         reply_markup=product_keyboard()
     )
 
-# Обработка кнопок
 @router.callback_query()
 async def handle_product_selection(callback: types.CallbackQuery):
     product_id = callback.data
@@ -86,32 +80,58 @@ async def handle_product_selection(callback: types.CallbackQuery):
 
 dp.include_router(router)
 
-# Webhook ЮKassa
 async def yookassa_webhook_handler(request):
     data = await request.json()
     logging.info(f"📩 Уведомление от ЮKassa: {data}")
     return web.Response(text="ok")
 
-# aiohttp-приложение
+async def root_handler(request):
+    return web.json_response({"status": "ok", "message": "Бот работает!"})
+
+# Обработчик webhook Telegram
+async def telegram_webhook_handler(request: web.Request):
+    try:
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.process_update(update)
+    except Exception as e:
+        logging.error(f"Ошибка обработки обновления: {e}")
+    return web.Response(text="ok")
+
+async def on_startup(app):
+    webhook_url = os.getenv("WEBHOOK_URL")  # Например: https://yourdomain.com/webhook
+    if not webhook_url:
+        logging.error("WEBHOOK_URL не задан в переменных окружения")
+        return
+    await bot.set_webhook(webhook_url)
+    logging.info(f"Webhook установлен на {webhook_url}")
+
+async def on_cleanup(app):
+    await bot.delete_webhook()
+    await bot.session.close()
+
 def setup_web_app():
     app = web.Application()
     app.router.add_post("/yookassa-webhook", yookassa_webhook_handler)
+    app.router.add_post("/webhook", telegram_webhook_handler)  # Telegram webhook здесь
+    app.router.add_get("/", root_handler)
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
     return app
 
-# Основной запуск
-async def start():
-    port = int(os.getenv("PORT", 3000))  # Render подставит свой порт
+async def main():
+    port = int(os.getenv("PORT", 3000))
     app = setup_web_app()
-
-    # Параллельный запуск бота и сервера
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    logging.info(f"🚀 Сервер запущен на порту {port}")
+    # Не запускаем polling!
 
-    logging.info("✅ Сервер запущен, бот работает.")
-    await dp.start_polling(bot)
+    # Просто держим цикл в работе
+    while True:
+        await asyncio.sleep(3600)
 
-# Запуск (без asyncio.run, безопасно для Windows)
-loop = asyncio.get_event_loop()
-loop.run_until_complete(start())
+if __name__ == "__main__":
+    asyncio.run(main())
