@@ -3,6 +3,9 @@ import uuid
 import os
 import asyncio
 import requests
+import logging
+import uuid
+import requests
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
@@ -59,10 +62,13 @@ async def handle_product_selection(callback: types.CallbackQuery):
         "description": f"Покупка: {product['name']}"
     }
 
+    logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
+    logging.info(f"SECRET_KEY starts with: {SECRET_KEY[:5]}...")
+
     response = requests.post(
         "https://api.yookassa.ru/v3/payments",
         json=payment_data,
-        auth=(str(SHOP_ID), SECRET_KEY),
+        auth=(str(SHOP_ID), SECRET_KEY),  # Приводим SHOP_ID к строке
         headers={
             "Idempotence-Key": str(uuid.uuid4()),
             "Content-Type": "application/json"
@@ -80,9 +86,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
             f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}"
         )
     await callback.answer()
-
-dp.include_router(router)
-
+    
 # === Обработчики для aiohttp ===
 
 async def yookassa_webhook_handler(request):
@@ -97,13 +101,13 @@ async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
         update = types.Update(**data)
-        await dp.feed_update(bot, update)
+        await dp.feed_update(bot, update)  # <-- Важно: правильный вызов
     except Exception as e:
         logging.error(f"Ошибка обработки обновления: {e}")
     return web.Response(text="ok")
 
 async def on_startup(app):
-    webhook_url = os.getenv("WEBHOOK_URL")
+    webhook_url = os.getenv("WEBHOOK_URL")  # https://yourdomain.com/webhook
     if not webhook_url:
         logging.error("WEBHOOK_URL не задан в переменных окружения")
         return
@@ -137,3 +141,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
