@@ -100,6 +100,12 @@ async def root_handler(request):
 async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
+        logging.info(f"Получено обновление: {data}")
+
+        if not data:
+            logging.warning("Получены пустые данные обновления!")
+            return web.Response(text="ok")
+
         update = types.Update(**data)
         await dp.feed_update(bot, update)
     except Exception as e:
