@@ -3,9 +3,6 @@ import uuid
 import os
 import asyncio
 import requests
-import logging
-import uuid
-import requests
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
@@ -18,6 +15,9 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
+
+# Важно: подключаем роутер к диспетчеру, чтобы обработчики сработали
+dp.include_router(router)
 
 products = {
     "bot_course": {"name": "Курс: Как создать бота", "price": 199},
@@ -32,7 +32,6 @@ def product_keyboard():
     ])
 
 @router.message(CommandStart())
-@router.message()
 async def greet_user(message: Message):
     await message.answer(
         "👋 Приветствуем в вашем цифровом магазине!\n\n"
@@ -68,14 +67,15 @@ async def handle_product_selection(callback: types.CallbackQuery):
     response = requests.post(
         "https://api.yookassa.ru/v3/payments",
         json=payment_data,
-        auth=(str(SHOP_ID), SECRET_KEY),  # Приводим SHOP_ID к строке
+        auth=(str(SHOP_ID), SECRET_KEY),
         headers={
             "Idempotence-Key": str(uuid.uuid4()),
             "Content-Type": "application/json"
         }
     )
 
-    if response.status_code == 200:
+    # YooKassa возвращает статус 201 при успешном создании платежа
+    if response.status_code == 201:
         url = response.json()["confirmation"]["confirmation_url"]
         await callback.message.answer(
             f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
@@ -86,7 +86,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
             f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}"
         )
     await callback.answer()
-    
+
 # === Обработчики для aiohttp ===
 
 async def yookassa_webhook_handler(request):
@@ -101,13 +101,13 @@ async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
         update = types.Update(**data)
-        await dp.feed_update(bot, update)  # <-- Важно: правильный вызов
+        await dp.feed_update(bot, update)
     except Exception as e:
         logging.error(f"Ошибка обработки обновления: {e}")
     return web.Response(text="ok")
 
 async def on_startup(app):
-    webhook_url = os.getenv("WEBHOOK_URL")  # https://yourdomain.com/webhook
+    webhook_url = os.getenv("WEBHOOK_URL")  # Должен быть задан в переменных окружения
     if not webhook_url:
         logging.error("WEBHOOK_URL не задан в переменных окружения")
         return
@@ -141,4 +141,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
