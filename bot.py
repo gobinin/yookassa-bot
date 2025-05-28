@@ -62,7 +62,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
     response = requests.post(
         "https://api.yookassa.ru/v3/payments",
         json=payment_data,
-        auth=(SHOP_ID, SECRET_KEY),
+        auth=(str(SHOP_ID), SECRET_KEY),
         headers={
             "Idempotence-Key": str(uuid.uuid4()),
             "Content-Type": "application/json"
