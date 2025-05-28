@@ -3,17 +3,18 @@ import uuid
 import os
 import asyncio
 import requests
+
 from aiohttp import web
-from aiogram import Bot, Dispatcher, Router, types
+from aiogram import Bot, Router, types
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 from config import BOT_TOKEN, SHOP_ID, SECRET_KEY
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-dp = Dispatcher()
 router = Router()
 
 products = {
@@ -30,7 +31,7 @@ def product_keyboard():
 
 @router.message(CommandStart())
 @router.message()
-async def greet_user(message: Message):
+async def greet_user(message: types.Message):
     await message.answer(
         "👋 Приветствуем в вашем цифровом магазине!\n\n"
         "Выберите товар для покупки:",
@@ -78,42 +79,42 @@ async def handle_product_selection(callback: types.CallbackQuery):
         await callback.message.answer("❌ Ошибка при создании оплаты.")
     await callback.answer()
 
-dp.include_router(router)
-
-async def yookassa_webhook_handler(request):
-    data = await request.json()
-    logging.info(f"📩 Уведомление от ЮKassa: {data}")
-    return web.Response(text="ok")
-
-async def root_handler(request):
-    return web.json_response({"status": "ok", "message": "Бот работает!"})
-
-# Обработчик webhook Telegram
+# Webhook обработчик от Telegram
 async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
         update = types.Update(**data)
-        await dp.process_update(update)
+        await router.process_update(update)  # Важно — вызываем именно router.process_update
     except Exception as e:
         logging.error(f"Ошибка обработки обновления: {e}")
     return web.Response(text="ok")
 
-async def on_startup(app):
-    webhook_url = os.getenv("WEBHOOK_URL")  # Например: https://yourdomain.com/webhook
+# Обработчик webhook от ЮKassa
+async def yookassa_webhook_handler(request: web.Request):
+    data = await request.json()
+    logging.info(f"📩 Уведомление от ЮKassa: {data}")
+    return web.Response(text="ok")
+
+# Просто корневая страница для проверки сервера
+async def root_handler(request: web.Request):
+    return web.json_response({"status": "ok", "message": "Бот работает!"})
+
+async def on_startup(app: web.Application):
+    webhook_url = os.getenv("WEBHOOK_URL")  # Например, https://yourdomain.com/webhook
     if not webhook_url:
         logging.error("WEBHOOK_URL не задан в переменных окружения")
         return
     await bot.set_webhook(webhook_url)
     logging.info(f"Webhook установлен на {webhook_url}")
 
-async def on_cleanup(app):
+async def on_cleanup(app: web.Application):
     await bot.delete_webhook()
     await bot.session.close()
 
 def setup_web_app():
     app = web.Application()
     app.router.add_post("/yookassa-webhook", yookassa_webhook_handler)
-    app.router.add_post("/webhook", telegram_webhook_handler)  # Telegram webhook здесь
+    app.router.add_post("/webhook", telegram_webhook_handler)  # Telegram webhook URL
     app.router.add_get("/", root_handler)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
@@ -127,9 +128,7 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logging.info(f"🚀 Сервер запущен на порту {port}")
-    # Не запускаем polling!
 
-    # Просто держим цикл в работе
     while True:
         await asyncio.sleep(3600)
 
