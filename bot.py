@@ -100,16 +100,23 @@ async def root_handler(request):
 async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
-        logging.info(f"Получено обновление: {data}")
+        logging.info(f"Получено обновление (type={type(data)}): {data}")
 
-        if not data:
-            logging.warning("Получены пустые данные обновления!")
+        # Проверяем, что data — словарь и не пустой
+        if not isinstance(data, dict) or not data:
+            logging.warning("Получены пустые или некорректные данные обновления")
+            return web.Response(text="ok")
+
+        # Проверяем наличие обязательного ключа 'update_id'
+        if "update_id" not in data:
+            logging.warning("В данных обновления нет ключа 'update_id'")
             return web.Response(text="ok")
 
         update = types.Update(**data)
         await dp.feed_update(bot, update)
+
     except Exception as e:
-        logging.error(f"Ошибка обработки обновления: {e}")
+        logging.error(f"Ошибка обработки обновления: {e}", exc_info=True)
     return web.Response(text="ok")
 
 async def on_startup(app):
