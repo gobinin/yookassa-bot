@@ -61,7 +61,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
         "receipt": {
             "customer": {
                 "full_name": "Покупатель",
-                "email": "customer@example.com"  # Вставь свой email при необходимости
+                "email": "customer@example.com"
             },
             "items": [
                 {
@@ -71,7 +71,10 @@ async def handle_product_selection(callback: types.CallbackQuery):
                         "value": f"{product['price']:.2f}",
                         "currency": "RUB"
                     },
-                    "vat_code": 1
+                    "vat_code": 1,
+                    "payment_mode": "full_payment",
+                    "payment_subject": "service",
+                    "measure": "piece"
                 }
             ]
         }
