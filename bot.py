@@ -57,27 +57,8 @@ async def handle_product_selection(callback: types.CallbackQuery):
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
         },
         "capture": True,
-        "description": f"Покупка: {product['name']}",
-        "receipt": {
-            "customer": {
-                "full_name": "Покупатель",
-                "email": "customer@example.com"
-            },
-            "items": [
-                {
-                    "description": product["name"],
-                    "quantity": "1.00",
-                    "amount": {
-                        "value": f"{product['price']:.2f}",
-                        "currency": "RUB"
-                    },
-                    "vat_code": 1,
-                    "payment_mode": "full_payment",
-                    "payment_subject": "service",
-                    "measure": "piece"
-                }
-            ]
-        }
+        "description": f"Покупка: {product['name']}"
+        # 🔴 receipt удалён, чек не отправляется
     }
 
     logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
