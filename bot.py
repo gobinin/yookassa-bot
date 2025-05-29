@@ -57,7 +57,23 @@ async def handle_product_selection(callback: types.CallbackQuery):
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
         },
         "capture": True,
-        "description": f"Покупка: {product['name']}"
+        "description": f"Покупка: {product['name']}",
+        "receipt": {
+            "customer": {
+                "email": "test@example.com"  # ⚠️ В будущем можешь запрашивать у пользователя
+            },
+            "items": [
+                {
+                    "description": product["name"],
+                    "quantity": 1.0,
+                    "amount": {
+                        "value": f"{product['price']:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1  # НДС 20%. Если у тебя "без НДС", укажи 5
+                }
+            ]
+        }
     }
 
     logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
@@ -98,18 +114,10 @@ async def root_handler(request):
 async def telegram_webhook_handler(request: web.Request):
     try:
         data = await request.json()
-
-        if not isinstance(data, dict) or not data:
-            logging.warning("Пустой или некорректный JSON получен от Telegram")
-            return web.Response(text="empty or invalid update")
-
-        logging.info(f"Получено обновление (type={type(data)}): {data}")
-
         update = types.Update(**data)
         await dp.feed_update(bot, update)
-
     except Exception as e:
-        logging.error(f"Ошибка обработки обновления: {e}", exc_info=True)
+        logging.error(f"Ошибка обработки обновления: {e}")
     return web.Response(text="ok")
 
 async def on_startup(app):
