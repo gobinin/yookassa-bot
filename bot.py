@@ -18,11 +18,15 @@ router = Router()
 
 dp.include_router(router)
 
+# === Список товаров и ID для выдачи ===
 products = {
-    "bot_course": {"name": "Курс: Как создать бота", "price": 199},
-    "pdf_guide": {"name": "PDF-инструкция", "price": 99},
-    "combo": {"name": "Пакет: Курс + Гайд", "price": 249},
+    "bot_course": {"name": "Курс: Как создать бота", "price": 199, "file_path": "files/bot_course.pdf"},
+    "pdf_guide": {"name": "PDF-инструкция", "price": 99, "file_path": "files/guide.pdf"},
+    "combo": {"name": "Пакет: Курс + Гайд", "price": 249, "file_path": "files/combo.zip"},
 }
+
+# === Хранилище соответствия payment_id -> Telegram user ===
+pending_payments = {}
 
 def product_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -47,26 +51,6 @@ async def handle_product_selection(callback: types.CallbackQuery):
         await callback.answer("Товар не найден", show_alert=True)
         return
 
-    # === 🧾 Корректный чек для самозанятого ===
-    receipt = {
-        "customer": {
-            "email": "buyer@example.com"
-        },
-        "items": [
-            {
-                "description": product["name"],
-                "quantity": "1.00",
-                "amount": {
-                    "value": f"{product['price']:.2f}",
-                    "currency": "RUB"
-                },
-                "vat_code": 1,
-                "payment_mode": "full_payment",
-                "payment_subject": "service"
-            }
-        ]
-    }
-
     payment_data = {
         "amount": {
             "value": f"{product['price']:.2f}",
@@ -77,8 +61,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
         },
         "capture": True,
-        "description": f"Покупка: {product['name']}",
-        "receipt": receipt
+        "description": f"{callback.from_user.id}:{product_id}"  # Сохраняем ID покупателя и товара
     }
 
     response = requests.post(
@@ -92,7 +75,10 @@ async def handle_product_selection(callback: types.CallbackQuery):
     )
 
     if response.status_code == 201:
-        url = response.json()["confirmation"]["confirmation_url"]
+        data = response.json()
+        url = data["confirmation"]["confirmation_url"]
+        payment_id = data["id"]
+        pending_payments[payment_id] = callback.from_user.id
         await callback.message.answer(
             f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
         )
@@ -103,12 +89,35 @@ async def handle_product_selection(callback: types.CallbackQuery):
         )
     await callback.answer()
 
-# === AIOHTTP ===
-
+# === Обработка уведомлений от ЮKassa ===
 async def yookassa_webhook_handler(request):
     data = await request.json()
     logging.info(f"📩 Уведомление от ЮKassa: {data}")
+
+    event = data.get("event")
+    obj = data.get("object", {})
+    payment_id = obj.get("id")
+    status = obj.get("status")
+    description = obj.get("description", "")
+
+    if event == "payment.succeeded" and status == "succeeded":
+        try:
+            user_id_str, product_id = description.split(":")
+            user_id = int(user_id_str)
+            product = products.get(product_id)
+            if product:
+                file_path = product["file_path"]
+                if os.path.exists(file_path):
+                    await bot.send_document(user_id, types.FSInputFile(file_path))
+                else:
+                    await bot.send_message(user_id, f"✅ Оплата за <b>{product['name']}</b> прошла!\nНо файл не найден.")
+            else:
+                await bot.send_message(user_id, "✅ Оплата получена, но товар не найден.")
+        except Exception as e:
+            logging.error(f"Ошибка при разборе уведомления: {e}")
     return web.Response(text="ok")
+
+# === AIOHTTP ===
 
 async def root_handler(request):
     return web.json_response({"status": "ok", "message": "Бот работает!"})
