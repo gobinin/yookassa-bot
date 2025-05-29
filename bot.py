@@ -60,7 +60,8 @@ async def handle_product_selection(callback: types.CallbackQuery):
         "description": f"Покупка: {product['name']}",
         "receipt": {
             "customer": {
-                "full_name": "Покупатель"
+                "full_name": "Покупатель",
+                "email": "customer@example.com"  # Вставь свой email при необходимости
             },
             "items": [
                 {
