@@ -16,7 +16,6 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
 
-# Подключаем роутер к диспетчеру
 dp.include_router(router)
 
 products = {
@@ -58,7 +57,23 @@ async def handle_product_selection(callback: types.CallbackQuery):
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
         },
         "capture": True,
-        "description": f"Покупка: {product['name']}"
+        "description": f"Покупка: {product['name']}",
+        "receipt": {
+            "customer": {
+                "full_name": "Покупатель"
+            },
+            "items": [
+                {
+                    "description": product["name"],
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{product['price']:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1
+                }
+            ]
+        }
     }
 
     logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
@@ -80,10 +95,9 @@ async def handle_product_selection(callback: types.CallbackQuery):
             f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
         )
     else:
-        error_data = response.json()
-        logging.error(f"Ошибка от ЮKassa: {response.status_code} — {error_data}")
+        logging.error(f"Ошибка от ЮKassa: {response.status_code} — {response.text}")
         await callback.message.answer(
-            f"❌ Ошибка при создании оплаты.\n\n{error_data}"
+            f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}"
         )
     await callback.answer()
 
