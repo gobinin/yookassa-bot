@@ -47,6 +47,26 @@ async def handle_product_selection(callback: types.CallbackQuery):
         await callback.answer("Товар не найден", show_alert=True)
         return
 
+    # === 🧾 Корректный чек для самозанятого ===
+    receipt = {
+        "customer": {
+            "email": "buyer@example.com"
+        },
+        "items": [
+            {
+                "description": product["name"],
+                "quantity": "1.00",
+                "amount": {
+                    "value": f"{product['price']:.2f}",
+                    "currency": "RUB"
+                },
+                "vat_code": 1,
+                "payment_mode": "full_payment",
+                "payment_subject": "service"
+            }
+        ]
+    }
+
     payment_data = {
         "amount": {
             "value": f"{product['price']:.2f}",
@@ -58,14 +78,8 @@ async def handle_product_selection(callback: types.CallbackQuery):
         },
         "capture": True,
         "description": f"Покупка: {product['name']}",
-        "payment_method_data": {
-            "type": "bank_card"
-        }
-        # receipt не нужен, убран
+        "receipt": receipt
     }
-
-    logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
-    logging.info(f"SECRET_KEY starts with: {SECRET_KEY[:5]}...")
 
     response = requests.post(
         "https://api.yookassa.ru/v3/payments",
@@ -89,7 +103,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
         )
     await callback.answer()
 
-# === Обработчики для aiohttp ===
+# === AIOHTTP ===
 
 async def yookassa_webhook_handler(request):
     data = await request.json()
