@@ -57,8 +57,11 @@ async def handle_product_selection(callback: types.CallbackQuery):
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
         },
         "capture": True,
-        "description": f"Покупка: {product['name']}"
-        # receipt удалён, чек не отправляется
+        "description": f"Покупка: {product['name']}",
+        "payment_method_data": {
+            "type": "bank_card"
+        }
+        # receipt не нужен, убран
     }
 
     logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
