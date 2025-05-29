@@ -19,12 +19,11 @@ router = Router()
 dp.include_router(router)
 
 products = {
-    "bot_course": {"name": "Курс: Как создать бота", "price": 199, "file_path": "files/bot_course.pdf"},
-    "pdf_guide": {"name": "PDF-инструкция", "price": 99, "file_path": "files/guide.pdf"},
-    "combo": {"name": "Пакет: Курс + Гайд", "price": 249, "file_path": "files/combo.zip"},
+    "bot_course": {"name": "Курс: Как создать бота", "price": 199.00, "file_path": "files/bot_course.pdf"},
+    "pdf_guide": {"name": "PDF-инструкция", "price": 99.00, "file_path": "files/guide.pdf"},
+    "combo": {"name": "Пакет: Курс + Гайд", "price": 249.00, "file_path": "files/combo.zip"},
 }
 
-# Хранение состояния пользователя: {user_id: {"product_id": str, "email": str}}
 user_data = {}
 
 def product_keyboard():
@@ -49,7 +48,6 @@ async def product_chosen(callback: types.CallbackQuery):
         await callback.answer("Товар не найден", show_alert=True)
         return
     
-    # Сохраняем выбор пользователя
     user_data[callback.from_user.id] = {"product_id": product_id, "email": None}
 
     await callback.message.answer(
@@ -84,9 +82,10 @@ async def receive_email_or_phone(message: Message):
     user_data[user_id]["email"] = contact
     product_id = user_data[user_id]["product_id"]
     product = products[product_id]
-
     bot_info = await bot.get_me()
+
     receipt_customer = {contact_type: contact}
+    description = f"{user_id}:{product_id}"
 
     payment_data = {
         "amount": {
@@ -98,12 +97,12 @@ async def receive_email_or_phone(message: Message):
             "return_url": f"https://t.me/{bot_info.username}"
         },
         "capture": True,
-        "description": f"{user_id}:{product_id}",
+        "description": description,
         "receipt": {
             "customer": receipt_customer,
             "items": [
                 {
-                    "description": product["name"],
+                    "description": product["name"][:128],
                     "quantity": "1.00",
                     "amount": {
                         "value": f"{product['price']:.2f}",
@@ -115,33 +114,35 @@ async def receive_email_or_phone(message: Message):
         }
     }
 
-    response = requests.post(
-        "https://api.yookassa.ru/v3/payments",
-        json=payment_data,
-        auth=(str(SHOP_ID), SECRET_KEY),
-        headers={
-            "Idempotence-Key": str(uuid.uuid4()),
-            "Content-Type": "application/json"
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.yookassa.ru/v3/payments",
+            json=payment_data,
+            auth=(str(SHOP_ID), SECRET_KEY),
+            headers={
+                "Idempotence-Key": str(uuid.uuid4()),
+                "Content-Type": "application/json"
+            }
+        )
 
-    if response.status_code == 201:
-        data = response.json()
-        url = data["confirmation"]["confirmation_url"]
-        payment_id = data["id"]
-        await message.answer(
-            f"🔗 Вот ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}\n\n"
-            "После оплаты вы получите файл здесь."
-        )
-    else:
-        logging.error(f"Ошибка ЮKassa: {response.status_code} — {response.text}")
-        try:
-            err_desc = response.json().get('description', 'Нет описания ошибки')
-        except Exception:
-            err_desc = response.text
-        await message.answer(
-            f"❌ Ошибка при создании оплаты.\n\n{err_desc}"
-        )
+        if response.status_code == 201:
+            data = response.json()
+            url = data["confirmation"]["confirmation_url"]
+            await message.answer(
+                f"🔗 Вот ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}\n\n"
+                "После оплаты вы получите файл здесь."
+            )
+        else:
+            logging.error(f"Ошибка ЮKassa: {response.status_code} — {response.text}")
+            try:
+                err_desc = response.json().get("description", "Нет описания ошибки")
+            except Exception:
+                err_desc = response.text
+            await message.answer(f"❌ Ошибка при создании оплаты.\n\n{err_desc}")
+    except Exception as e:
+        logging.exception("Исключение при создании платежа")
+        await message.answer("❌ Произошла ошибка при попытке создать платёж. Попробуйте позже.")
+
     user_data[user_id]["email"] = None
 
 async def yookassa_webhook_handler(request):
@@ -150,7 +151,6 @@ async def yookassa_webhook_handler(request):
 
     event = data.get("event")
     obj = data.get("object", {})
-    payment_id = obj.get("id")
     status = obj.get("status")
     description = obj.get("description", "")
 
@@ -168,7 +168,7 @@ async def yookassa_webhook_handler(request):
             else:
                 await bot.send_message(user_id, "✅ Оплата получена, но товар не найден.")
         except Exception as e:
-            logging.error(f"Ошибка при разборе уведомления: {e}")
+            logging.exception(f"Ошибка при обработке уведомления: {e}")
     return web.Response(text="ok")
 
 async def root_handler(request):
@@ -180,13 +180,13 @@ async def telegram_webhook_handler(request: web.Request):
         update = types.Update(**data)
         await dp.feed_update(bot, update)
     except Exception as e:
-        logging.error(f"Ошибка обработки обновления: {e}")
+        logging.exception("Ошибка при обработке обновления Telegram")
     return web.Response(text="ok")
 
 async def on_startup(app):
     webhook_url = os.getenv("WEBHOOK_URL")
     if not webhook_url:
-        logging.error("WEBHOOK_URL не задан в переменных окружения")
+        logging.error("WEBHOOK_URL не задан")
         return
     await bot.set_webhook(webhook_url)
     logging.info(f"Webhook установлен на {webhook_url}")
