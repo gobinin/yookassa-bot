@@ -2,12 +2,13 @@ import logging
 import uuid
 import os
 import asyncio
+import re
 import requests
 from aiohttp import web
-from aiogram import Bot, Dispatcher, Router, types
+from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Text
 from config import BOT_TOKEN, SHOP_ID, SECRET_KEY
 
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +16,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
-
 dp.include_router(router)
 
 products = {
@@ -24,7 +24,8 @@ products = {
     "combo": {"name": "Пакет: Курс + Гайд", "price": 249, "file_path": "files/combo.zip"},
 }
 
-pending_payments = {}
+# Хранение состояния пользователя: {user_id: {"product_id": str, "email": str}}
+user_data = {}
 
 def product_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -35,21 +36,62 @@ def product_keyboard():
 @router.message(CommandStart())
 async def greet_user(message: Message):
     await message.answer(
-        "👋 Приветствуем в вашем цифровом магазине!\n\n"
+        "👋 Привет! Это магазин цифровых товаров.\n"
         "Выберите товар для покупки:",
         reply_markup=product_keyboard()
     )
 
 @router.callback_query()
-async def handle_product_selection(callback: types.CallbackQuery):
+async def product_chosen(callback: types.CallbackQuery):
     product_id = callback.data
     product = products.get(product_id)
-
     if not product:
         await callback.answer("Товар не найден", show_alert=True)
         return
+    
+    # Сохраняем выбор пользователя
+    user_data[callback.from_user.id] = {"product_id": product_id, "email": None}
 
-    # Вот тут убираем чек (receipt) — делаем простой запрос
+    await callback.message.answer(
+        f"Вы выбрали <b>{product['name']}</b> за {product['price']}₽.\n\n"
+        "Для формирования чека, пожалуйста, введите ваш email или номер телефона.\n"
+        "Это нужно для корректной фискализации и отправки чека.\n\n"
+        "Например: user@example.com или +79991234567"
+    )
+    await callback.answer()
+
+def is_valid_email(email: str) -> bool:
+    return re.match(r"[^@]+@[^@]+\.[^@]+", email) is not None
+
+def is_valid_phone(phone: str) -> bool:
+    return re.match(r"^\+?\d{7,15}$", phone) is not None
+
+@router.message()
+async def receive_email_or_phone(message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_data or user_data[user_id]["email"] is not None:
+        # Нет текущего выбора товара или email уже введен — игнорируем
+        return
+    
+    contact = message.text.strip()
+    if is_valid_email(contact):
+        contact_type = "email"
+    elif is_valid_phone(contact):
+        contact_type = "phone"
+    else:
+        await message.answer("❌ Пожалуйста, введите корректный email или номер телефона.")
+        return
+    
+    user_data[user_id]["email"] = contact
+    product_id = user_data[user_id]["product_id"]
+    product = products[product_id]
+
+    # Получаем имя бота для return_url
+    bot_info = await bot.get_me()
+
+    # Формируем receipt в зависимости от типа контакта
+    receipt_customer = {contact_type: contact}
+
     payment_data = {
         "amount": {
             "value": f"{product['price']:.2f}",
@@ -57,10 +99,24 @@ async def handle_product_selection(callback: types.CallbackQuery):
         },
         "confirmation": {
             "type": "redirect",
-            "return_url": f"https://t.me/{(await bot.get_me()).username}"
+            "return_url": f"https://t.me/{bot_info.username}"
         },
         "capture": True,
-        "description": f"{callback.from_user.id}:{product_id}"  # сохраняем ID покупателя и товара
+        "description": f"{user_id}:{product_id}",
+        "receipt": {
+            "customer": receipt_customer,
+            "items": [
+                {
+                    "description": product["name"],
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{product['price']:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1
+                }
+            ]
+        }
     }
 
     response = requests.post(
@@ -77,16 +133,21 @@ async def handle_product_selection(callback: types.CallbackQuery):
         data = response.json()
         url = data["confirmation"]["confirmation_url"]
         payment_id = data["id"]
-        pending_payments[payment_id] = callback.from_user.id
-        await callback.message.answer(
-            f"🔗 Ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}"
+        await message.answer(
+            f"🔗 Вот ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}\n\n"
+            "После оплаты вы получите файл здесь."
         )
     else:
-        logging.error(f"Ошибка от ЮKassa: {response.status_code} — {response.text}")
-        await callback.message.answer(
-            f"❌ Ошибка при создании оплаты.\n\n{response.json().get('description', 'Нет описания ошибки')}"
+        logging.error(f"Ошибка ЮKassa: {response.status_code} — {response.text}")
+        try:
+            err_desc = response.json().get('description', 'Нет описания ошибки')
+        except Exception:
+            err_desc = response.text
+        await message.answer(
+            f"❌ Ошибка при создании оплаты.\n\n{err_desc}"
         )
-    await callback.answer()
+    # Очищаем email, чтобы избежать повторных платежей
+    user_data[user_id]["email"] = None
 
 async def yookassa_webhook_handler(request):
     data = await request.json()
