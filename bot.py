@@ -28,7 +28,7 @@ user_data = {}
 
 def product_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{v['name']} – {v['price']}₽", callback_data=k)]
+        [InlineKeyboardButton(text=f"{v['name']} – {int(v['price'])}₽", callback_data=k)]
         for k, v in products.items()
     ])
 
@@ -49,9 +49,8 @@ async def product_chosen(callback: types.CallbackQuery):
         return
     
     user_data[callback.from_user.id] = {"product_id": product_id, "email": None}
-
     await callback.message.answer(
-        f"Вы выбрали <b>{product['name']}</b> за {product['price']}₽.\n\n"
+        f"Вы выбрали <b>{product['name']}</b> за {int(product['price'])}₽.\n\n"
         "Для формирования чека, пожалуйста, введите ваш email или номер телефона.\n"
         "Это нужно для корректной фискализации и отправки чека.\n\n"
         "Например: user@example.com или +79991234567"
@@ -82,10 +81,9 @@ async def receive_email_or_phone(message: Message):
     user_data[user_id]["email"] = contact
     product_id = user_data[user_id]["product_id"]
     product = products[product_id]
-    bot_info = await bot.get_me()
 
+    bot_info = await bot.get_me()
     receipt_customer = {contact_type: contact}
-    description = f"{user_id}:{product_id}"
 
     payment_data = {
         "amount": {
@@ -97,7 +95,7 @@ async def receive_email_or_phone(message: Message):
             "return_url": f"https://t.me/{bot_info.username}"
         },
         "capture": True,
-        "description": description,
+        "description": f"{user_id}:{product_id}",
         "receipt": {
             "customer": receipt_customer,
             "items": [
@@ -114,35 +112,32 @@ async def receive_email_or_phone(message: Message):
         }
     }
 
-    try:
-        response = requests.post(
-            "https://api.yookassa.ru/v3/payments",
-            json=payment_data,
-            auth=(str(SHOP_ID), SECRET_KEY),
-            headers={
-                "Idempotence-Key": str(uuid.uuid4()),
-                "Content-Type": "application/json"
-            }
+    response = requests.post(
+        "https://api.yookassa.ru/v3/payments",
+        json=payment_data,
+        auth=(str(SHOP_ID), SECRET_KEY),
+        headers={
+            "Idempotence-Key": str(uuid.uuid4()),
+            "Content-Type": "application/json"
+        }
+    )
+
+    if response.status_code == 201:
+        data = response.json()
+        url = data["confirmation"]["confirmation_url"]
+        await message.answer(
+            f"🔗 Вот ссылка для оплаты <b>{product['name']}</b> на {int(product['price'])}₽:\n{url}\n\n"
+            "После оплаты вы получите файл здесь."
         )
-
-        if response.status_code == 201:
-            data = response.json()
-            url = data["confirmation"]["confirmation_url"]
-            await message.answer(
-                f"🔗 Вот ссылка для оплаты <b>{product['name']}</b> на {product['price']}₽:\n{url}\n\n"
-                "После оплаты вы получите файл здесь."
-            )
-        else:
-            logging.error(f"Ошибка ЮKassa: {response.status_code} — {response.text}")
-            try:
-                err_desc = response.json().get("description", "Нет описания ошибки")
-            except Exception:
-                err_desc = response.text
-            await message.answer(f"❌ Ошибка при создании оплаты.\n\n{err_desc}")
-    except Exception as e:
-        logging.exception("Исключение при создании платежа")
-        await message.answer("❌ Произошла ошибка при попытке создать платёж. Попробуйте позже.")
-
+    else:
+        logging.error(f"Ошибка ЮKassa: {response.status_code} — {response.text}")
+        try:
+            err_desc = response.json().get('description', 'Нет описания ошибки')
+        except Exception:
+            err_desc = response.text
+        await message.answer(
+            f"❌ Ошибка при создании оплаты.\n\n{err_desc}"
+        )
     user_data[user_id]["email"] = None
 
 async def yookassa_webhook_handler(request):
@@ -164,11 +159,11 @@ async def yookassa_webhook_handler(request):
                 if os.path.exists(file_path):
                     await bot.send_document(user_id, types.FSInputFile(file_path))
                 else:
-                    await bot.send_message(user_id, f"✅ Оплата за <b>{product['name']}</b> прошла!\nНо файл не найден.")
+                    await bot.send_message(user_id, f"✅ Оплата прошла, но файл <b>{product['name']}</b> не найден.")
             else:
                 await bot.send_message(user_id, "✅ Оплата получена, но товар не найден.")
         except Exception as e:
-            logging.exception(f"Ошибка при обработке уведомления: {e}")
+            logging.error(f"Ошибка при разборе уведомления: {e}")
     return web.Response(text="ok")
 
 async def root_handler(request):
@@ -180,13 +175,13 @@ async def telegram_webhook_handler(request: web.Request):
         update = types.Update(**data)
         await dp.feed_update(bot, update)
     except Exception as e:
-        logging.exception("Ошибка при обработке обновления Telegram")
+        logging.error(f"Ошибка обработки обновления: {e}")
     return web.Response(text="ok")
 
 async def on_startup(app):
     webhook_url = os.getenv("WEBHOOK_URL")
     if not webhook_url:
-        logging.error("WEBHOOK_URL не задан")
+        logging.error("WEBHOOK_URL не задан в переменных окружения")
         return
     await bot.set_webhook(webhook_url)
     logging.info(f"Webhook установлен на {webhook_url}")
@@ -212,7 +207,6 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logging.info(f"🚀 Сервер запущен на порту {port}")
-
     while True:
         await asyncio.sleep(3600)
 
