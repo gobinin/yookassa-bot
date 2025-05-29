@@ -58,7 +58,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
         },
         "capture": True,
         "description": f"Покупка: {product['name']}"
-        # 🔴 receipt удалён, чек не отправляется
+        # receipt удалён, чек не отправляется
     }
 
     logging.info(f"SHOP_ID type: {type(SHOP_ID)}, value: {SHOP_ID}")
