@@ -5,10 +5,10 @@ import asyncio
 import re
 import requests
 from aiohttp import web
-from aiogram import Bot, Dispatcher, Router, types, F
+from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart, Text
+from aiogram.filters import CommandStart
 from config import BOT_TOKEN, SHOP_ID, SECRET_KEY
 
 logging.basicConfig(level=logging.INFO)
@@ -70,7 +70,6 @@ def is_valid_phone(phone: str) -> bool:
 async def receive_email_or_phone(message: Message):
     user_id = message.from_user.id
     if user_id not in user_data or user_data[user_id]["email"] is not None:
-        # Нет текущего выбора товара или email уже введен — игнорируем
         return
     
     contact = message.text.strip()
@@ -86,10 +85,7 @@ async def receive_email_or_phone(message: Message):
     product_id = user_data[user_id]["product_id"]
     product = products[product_id]
 
-    # Получаем имя бота для return_url
     bot_info = await bot.get_me()
-
-    # Формируем receipt в зависимости от типа контакта
     receipt_customer = {contact_type: contact}
 
     payment_data = {
@@ -146,7 +142,6 @@ async def receive_email_or_phone(message: Message):
         await message.answer(
             f"❌ Ошибка при создании оплаты.\n\n{err_desc}"
         )
-    # Очищаем email, чтобы избежать повторных платежей
     user_data[user_id]["email"] = None
 
 async def yookassa_webhook_handler(request):
