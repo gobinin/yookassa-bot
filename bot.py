@@ -18,14 +18,12 @@ router = Router()
 
 dp.include_router(router)
 
-# === Список товаров и ID для выдачи ===
 products = {
     "bot_course": {"name": "Курс: Как создать бота", "price": 199, "file_path": "files/bot_course.pdf"},
     "pdf_guide": {"name": "PDF-инструкция", "price": 99, "file_path": "files/guide.pdf"},
     "combo": {"name": "Пакет: Курс + Гайд", "price": 249, "file_path": "files/combo.zip"},
 }
 
-# === Хранилище соответствия payment_id -> Telegram user ===
 pending_payments = {}
 
 def product_keyboard():
@@ -51,6 +49,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
         await callback.answer("Товар не найден", show_alert=True)
         return
 
+    # Вот тут убираем чек (receipt) — делаем простой запрос
     payment_data = {
         "amount": {
             "value": f"{product['price']:.2f}",
@@ -61,7 +60,7 @@ async def handle_product_selection(callback: types.CallbackQuery):
             "return_url": f"https://t.me/{(await bot.get_me()).username}"
         },
         "capture": True,
-        "description": f"{callback.from_user.id}:{product_id}"  # Сохраняем ID покупателя и товара
+        "description": f"{callback.from_user.id}:{product_id}"  # сохраняем ID покупателя и товара
     }
 
     response = requests.post(
@@ -89,7 +88,6 @@ async def handle_product_selection(callback: types.CallbackQuery):
         )
     await callback.answer()
 
-# === Обработка уведомлений от ЮKassa ===
 async def yookassa_webhook_handler(request):
     data = await request.json()
     logging.info(f"📩 Уведомление от ЮKassa: {data}")
@@ -116,8 +114,6 @@ async def yookassa_webhook_handler(request):
         except Exception as e:
             logging.error(f"Ошибка при разборе уведомления: {e}")
     return web.Response(text="ok")
-
-# === AIOHTTP ===
 
 async def root_handler(request):
     return web.json_response({"status": "ok", "message": "Бот работает!"})
