@@ -35,7 +35,8 @@ def product_keyboard():
 @router.message(CommandStart())
 async def greet_user(message: Message):
     await message.answer(
-        "👋 Привет! Это магазин цифровых товаров.\n"
+        "👋 Привет! Это магазин цифровых товаров.
+"
         "Выберите товар для покупки:",
         reply_markup=product_keyboard()
     )
@@ -50,8 +51,12 @@ async def product_chosen(callback: types.CallbackQuery):
 
     user_data[callback.from_user.id] = {"product_id": product_id, "email": None}
     await callback.message.answer(
-        f"Вы выбрали <b>{product['name']}</b> за {int(product['price'])}₽.\n\n"
-        "Введите ваш email или номер телефона для получения чека:\n\n"
+        f"Вы выбрали <b>{product['name']}</b> за {int(product['price'])}₽.
+
+"
+        "Введите ваш email или номер телефона для получения чека:
+
+"
         "Пример: user@example.com или +79991234567"
     )
     await callback.answer()
@@ -105,10 +110,10 @@ async def receive_email_or_phone(message: Message):
                         "value": f"{product['price']:.2f}",
                         "currency": "RUB"
                     },
-                    "vat_code": 1  # НДС 20%
+                    "vat_code": 1
                 }
             ],
-            "tax_system_code": 1  # Общая система налогообложения
+            "tax_system_code": 1
         }
     }
 
@@ -128,16 +133,25 @@ async def receive_email_or_phone(message: Message):
         data = response.json()
         url = data["confirmation"]["confirmation_url"]
         await message.answer(
-            f"🔗 Ссылка для оплаты <b>{product['name']}</b> ({int(product['price'])}₽):\n{url}\n\n"
+            f"🔗 Ссылка для оплаты <b>{product['name']}</b> ({int(product['price'])}₽):
+{url}
+
+"
             "После оплаты вы получите файл прямо здесь."
         )
     else:
         logging.error(f"❌ Ошибка от YooKassa: {response.status_code} — {response.text}")
         try:
-            err_desc = response.json().get('description', 'Нет описания ошибки')
-        except Exception:
-            err_desc = response.text
-        await message.answer(f"❌ Ошибка при создании оплаты:\n\n{err_desc}")
+            err_json = response.json()
+            logging.error(f"⚠️ Подробности ошибки от YooKassa:
+{err_json}")
+            err_desc = err_json.get('description', 'Нет описания ошибки')
+        except Exception as e:
+            err_desc = f"Не удалось разобрать ответ: {e}
+{response.text}"
+        await message.answer(f"❌ Ошибка при создании оплаты:
+
+{err_desc}")
 
     user_data[user_id]["email"] = None
 
@@ -213,3 +227,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
