@@ -131,9 +131,13 @@ async def receive_email_or_phone(message: Message):
 
     if response.ok and "confirmation" in data:
         url = data["confirmation"]["confirmation_url"]
+        pay_button = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", url=url)]
+        ])
         await message.answer(
-            f"🔗 Ссылка для оплаты <b>{product['name']}</b> ({int(product['price'])}₽):\n{url}\n\n"
-            "После оплаты вы получите файл прямо здесь."
+            f"🔗 Для оплаты <b>{product['name']}</b> на сумму {int(product['price'])}₽ нажмите кнопку ниже.\n\n"
+            "После оплаты вы получите файл прямо здесь.",
+            reply_markup=pay_button
         )
     else:
         logging.error(f"❌ Ошибка от YooKassa: {response.status_code} — {response.text}")
