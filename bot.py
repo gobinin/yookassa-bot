@@ -35,7 +35,7 @@ def product_keyboard():
 @router.message(CommandStart())
 async def greet_user(message: Message):
     await message.answer(
-        "👋 Привет! Это магазин цифровых товаров.
+        "👋 Привет! Это магазин цифровых товаров."
 "
         "Выберите товар для покупки:",
         reply_markup=product_keyboard()
