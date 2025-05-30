@@ -82,6 +82,8 @@ async def receive_email_or_phone(message: Message):
     product = products[product_id]
     bot_info = await bot.get_me()
 
+    receipt_customer = {contact_type: contact}
+
     payment_data = {
         "amount": {
             "value": f"{product['price']:.2f}",
@@ -92,8 +94,25 @@ async def receive_email_or_phone(message: Message):
             "return_url": f"https://t.me/{bot_info.username}"
         },
         "capture": True,
-        "description": f"{user_id}:{product_id}"[:128]
+        "description": f"{user_id}:{product_id}"[:128],
+        "receipt": {
+            "customer": receipt_customer,
+            "items": [
+                {
+                    "description": product["name"][:128],
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{product['price']:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1  # НДС 20%
+                }
+            ],
+            "tax_system_code": 1  # Общая система налогообложения
+        }
     }
+
+    logging.info(f"Создаём платёж с данными: {payment_data}")
 
     response = requests.post(
         "https://api.yookassa.ru/v3/payments",
