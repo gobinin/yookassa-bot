@@ -47,7 +47,7 @@ async def product_chosen(callback: types.CallbackQuery):
     if not product:
         await callback.answer("Товар не найден", show_alert=True)
         return
-    
+
     user_data[callback.from_user.id] = {"product_id": product_id, "email": None}
     await callback.message.answer(
         f"Вы выбрали <b>{product['name']}</b> за {int(product['price'])}₽.\n\n"
@@ -81,7 +81,6 @@ async def receive_email_or_phone(message: Message):
     product_id = user_data[user_id]["product_id"]
     product = products[product_id]
     bot_info = await bot.get_me()
-    receipt_customer = {contact_type: contact}
 
     payment_data = {
         "amount": {
@@ -93,22 +92,7 @@ async def receive_email_or_phone(message: Message):
             "return_url": f"https://t.me/{bot_info.username}"
         },
         "capture": True,
-        "description": f"{user_id}:{product_id}"[:128],
-        "receipt": {
-            "customer": receipt_customer,
-            "items": [
-                {
-                    "description": product["name"][:128],
-                    "quantity": "1.00",
-                    "amount": {
-                        "value": f"{product['price']:.2f}",
-                        "currency": "RUB"
-                    },
-                    "vat_code": 1
-                }
-            ],
-            "tax_system_code": 1
-        }
+        "description": f"{user_id}:{product_id}"[:128]
     }
 
     response = requests.post(
