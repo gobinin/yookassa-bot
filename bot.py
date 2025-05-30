@@ -94,7 +94,7 @@ async def receive_email_or_phone(message: Message):
             "return_url": f"https://t.me/{bot_info.username}"
         },
         "capture": True,
-        "description": f"{user_id}:{product_id}"[:128],
+        "description": f"{user_id}:{product_id}",
         "receipt": {
             "customer": receipt_customer,
             "items": [
@@ -124,8 +124,12 @@ async def receive_email_or_phone(message: Message):
         }
     )
 
-    if response.status_code == 201:
+    try:
         data = response.json()
+    except Exception:
+        data = {}
+
+    if response.ok and "confirmation" in data:
         url = data["confirmation"]["confirmation_url"]
         await message.answer(
             f"🔗 Ссылка для оплаты <b>{product['name']}</b> ({int(product['price'])}₽):\n{url}\n\n"
@@ -133,15 +137,8 @@ async def receive_email_or_phone(message: Message):
         )
     else:
         logging.error(f"❌ Ошибка от YooKassa: {response.status_code} — {response.text}")
-        try:
-            err_json = response.json()
-            logging.error(f"⚠️ Подробности ошибки от YooKassa:\n{err_json}")
-            err_desc = err_json.get('description', 'Нет описания ошибки')
-        except Exception as e:
-            err_desc = f"Не удалось разобрать ответ: {e}\n{response.text}"
+        err_desc = data.get("description", "Нет описания ошибки")
         await message.answer(f"❌ Ошибка при создании оплаты:\n\n{err_desc}")
-
-    user_data[user_id]["email"] = None
 
 async def yookassa_webhook_handler(request):
     data = await request.json()
@@ -165,6 +162,7 @@ async def yookassa_webhook_handler(request):
                     await bot.send_message(user_id, f"✅ Оплата прошла, но файл <b>{product['name']}</b> не найден.")
             else:
                 await bot.send_message(user_id, "✅ Оплата получена, но товар не найден.")
+            user_data.pop(user_id, None)
         except Exception as e:
             logging.error(f"Ошибка при обработке платежа: {e}")
     return web.Response(text="ok")
