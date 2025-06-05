@@ -19,7 +19,7 @@ router = Router()
 dp.include_router(router)
 
 products = {
-    "bot_course": {"name": "Скачать GTA 5", "price": 0.00},
+    "bot_course": {"name": "Скачать GTA 5", "price": 10.00},
 }
 
 # Ссылки для скачивания
