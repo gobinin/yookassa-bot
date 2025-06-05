@@ -19,9 +19,16 @@ router = Router()
 dp.include_router(router)
 
 products = {
-    "bot_course": {"name": "Курс: Как создать бота", "price": 199.00, "file_path": "files/bot_course.pdf"},
-    "pdf_guide": {"name": "PDF-инструкция", "price": 99.00, "file_path": "files/guide.pdf"},
-    "combo": {"name": "Пакет: Курс + Гайд", "price": 249.00, "file_path": "files/combo.zip"},
+    "bot_course": {"name": "Курс: Как создать бота", "price": 199.00},
+    "pdf_guide": {"name": "PDF-инструкция", "price": 99.00},
+    "combo": {"name": "Пакет: Курс + Гайд", "price": 249.00},
+}
+
+# Ссылки для скачивания
+download_links = {
+    "bot_course": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw",
+    "pdf_guide": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw",
+    "combo": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw"
 }
 
 user_data = {}
@@ -136,7 +143,7 @@ async def receive_email_or_phone(message: Message):
         ])
         await message.answer(
             f"🔗 Для оплаты <b>{product['name']}</b> на сумму {int(product['price'])}₽ нажмите кнопку ниже.\n\n"
-            "После оплаты вы получите файл прямо здесь.",
+            "После оплаты вы получите ссылку для скачивания.",
             reply_markup=pay_button
         )
     else:
@@ -159,11 +166,14 @@ async def yookassa_webhook_handler(request):
             user_id = int(user_id_str)
             product = products.get(product_id)
             if product:
-                file_path = product["file_path"]
-                if os.path.exists(file_path):
-                    await bot.send_document(user_id, types.FSInputFile(file_path))
+                link = download_links.get(product_id)
+                if link:
+                    await bot.send_message(
+                        user_id,
+                        f"✅ Оплата прошла!\n\n📥 Вот ссылка для скачивания <b>{product['name']}</b>:\n\n{link}"
+                    )
                 else:
-                    await bot.send_message(user_id, f"✅ Оплата прошла, но файл <b>{product['name']}</b> не найден.")
+                    await bot.send_message(user_id, "✅ Оплата получена, но ссылка не найдена.")
             else:
                 await bot.send_message(user_id, "✅ Оплата получена, но товар не найден.")
             user_data.pop(user_id, None)
