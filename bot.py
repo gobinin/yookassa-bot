@@ -19,16 +19,12 @@ router = Router()
 dp.include_router(router)
 
 products = {
-    "bot_course": {"name": "Курс: Как создать бота", "price": 199.00},
-    "pdf_guide": {"name": "PDF-инструкция", "price": 99.00},
-    "combo": {"name": "Пакет: Курс + Гайд", "price": 249.00},
+    "bot_course": {"name": "Скачать GTA 5", "price": 0.00},
 }
 
 # Ссылки для скачивания
 download_links = {
-    "bot_course": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw",
-    "pdf_guide": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw",
-    "combo": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw"
+    "bot_course": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw"
 }
 
 user_data = {}
