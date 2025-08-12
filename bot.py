@@ -1,160 +1,194 @@
-import logging
-import uuid
+# bot.py — ЧИСТЫЙ БОТ ДЛЯ ПРИЁМА ЗАКАЗОВ (без YooKassa)
 import os
+import json
+import logging
 import asyncio
 import re
-import requests
-import json
+
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.filters import CommandStart, Command, Text
-from config import BOT_TOKEN, SHOP_ID, SECRET_KEY, WEBHOOK_URL, PORT, load_admins, save_admins
+from aiogram.filters import CommandStart, Command
 
+# --- Настройка логов ---
 logging.basicConfig(level=logging.INFO)
 
+# --- Конфиг: читаем из config.py или из окружения ---
+try:
+    # если у тебя есть config.py — он может содержать BOT_TOKEN, WEBHOOK_URL, PORT
+    from config import BOT_TOKEN, WEBHOOK_URL, PORT, ADMINS_FILE, ADMIN_IDS
+except Exception:
+    # fallback — читаем из окружения
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    try:
+        PORT = int(os.getenv("PORT", 3000))
+    except:
+        PORT = 3000
+    ADMINS_FILE = os.getenv("ADMINS_FILE", "admins.json")
+    ADMIN_IDS = os.getenv("ADMIN_IDS", "")  # строка "123,456"
+
+# --- Утилиты для админов ---
+def parse_default_admins(admins_str: str):
+    out = []
+    if not admins_str:
+        return out
+    for part in admins_str.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.append(int(p))
+        except:
+            continue
+    return out
+
+DEFAULT_ADMINS = parse_default_admins(ADMIN_IDS if 'ADMIN_IDS' in globals() else "")
+
+if 'ADMINS_FILE' not in globals():
+    ADMINS_FILE = "admins.json"
+
+def load_admins():
+    """Возвращает список админов (list[int]). Если файл есть — загружает, иначе создаёт и возвращает DEFAULT_ADMINS."""
+    if os.path.exists(ADMINS_FILE):
+        try:
+            with open(ADMINS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return [int(x) for x in data]
+        except Exception as e:
+            logging.warning(f"Не удалось прочитать {ADMINS_FILE}: {e}")
+    # создать файл с default
+    try:
+        with open(ADMINS_FILE, "w", encoding="utf-8") as f:
+            json.dump(DEFAULT_ADMINS, f)
+    except Exception:
+        pass
+    return DEFAULT_ADMINS.copy()
+
+def save_admins(admins):
+    try:
+        with open(ADMINS_FILE, "w", encoding="utf-8") as f:
+            json.dump([int(x) for x in admins], f)
+        return True
+    except Exception as e:
+        logging.error(f"Ошибка записи admins: {e}")
+        return False
+
+# --- Проверки формата телефона ---
+PHONE_RE = re.compile(r"^\+?\d{7,15}$")
+def is_valid_phone(phone: str) -> bool:
+    return bool(PHONE_RE.match(phone.strip()))
+
+# --- Инициализация бота и диспетчера ---
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# --- ПРОДУКТЫ (оставил твой цифровой товар как пример) ---
-products = {
-    "bot_course": {"name": "Скачать GTA 5", "price": 199.00},
-}
-
-download_links = {
-    "bot_course": "https://disk.yandex.ru/i/7sMDMIoR9-Lhnw"
-}
-
-# данные для оплаты (как были)
-user_data = {}  # для оплаты (old flow)
-# данные для заказов доставки (новый поток)
-order_data = {}  # {user_id: {"state": "await_contact"/"await_address"/"await_items", "phone":..., "address":..., "items":...}}
-
-# Загрузка админов (из admins.json или DEFAULT_ADMINS)
-ADMINS = load_admins()  # список int
-
-def is_valid_phone(phone: str) -> bool:
-    return re.match(r"^\+?\d{7,15}$", phone) is not None
-
-def is_valid_email(email: str) -> bool:
-    return re.match(r"[^@]+@[^@]+\.[^@]+", email) is not None
-
-def product_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{v['name']} – {int(v['price'])}₽", callback_data=k)]
-        for k, v in products.items()
-    ])
-
+# --- Простое меню ---
 def main_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Сделать заказ", callback_data="start_order")],
-        [InlineKeyboardButton(text="💾 Магазин (цифровые товары)", callback_data="show_products")]
+        [InlineKeyboardButton(text="ℹ Помощь", callback_data="help")]
     ])
 
-# клавиатура для отправки контакта (request_contact)
 contact_keyboard = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="📱 Отправить контакт", request_contact=True)]],
     resize_keyboard=True,
     one_time_keyboard=True
 )
 
+# Временное хранилище состояний пользователей (в памяти)
+order_data = {}  # {user_id: {"state": "await_contact"/"await_address"/"await_items", "phone":..., "address":..., "items":...}}
+
+# --- Команды /start ---
 @router.message(CommandStart())
-async def greet_user(message: Message):
+async def cmd_start(message: Message):
     await message.answer(
-        "👋 Привет! Добро пожаловать в сервис доставки нашего магазина.\n\n"
-        "Мы делаем всё просто: оформляете заказ — курьер привозит.\n\n"
-        "Нажмите кнопку ниже, чтобы начать.",
+        "👋 Привет! Это бот доставки вашего магазина.\n\n"
+        "Удобно оформляйте заказ — курьер привезёт всё к вам.",
         reply_markup=main_menu_keyboard()
     )
 
+# --- Обработка нажатий на inline-кнопки ---
 @router.callback_query()
-async def callback_handler(callback: types.CallbackQuery):
-    data = callback.data or ""
+async def callback_handler(cq: types.CallbackQuery):
+    data = (cq.data or "").strip()
+    uid = cq.from_user.id
+
     if data == "start_order":
-        # инициируем поток заказа
-        uid = callback.from_user.id
         order_data[uid] = {"state": "await_contact", "phone": None, "address": None, "items": None}
-        await callback.message.answer(
-            "📝 Отлично — начнём оформление заказа.\n\n"
-            "Нам потребуется ваш номер телефона (чтобы курьер мог связаться).",
+        await cq.message.answer(
+            "📝 Отлично! Для начала пришлите, пожалуйста, ваш номер телефона (курьер сможет с вами связаться).",
             reply_markup=contact_keyboard
         )
-        await callback.answer()
+        await cq.answer()
         return
 
-    if data == "show_products":
-        await callback.message.answer(
-            "💾 Наш магазин цифровых товаров. Выберите товар:",
-            reply_markup=product_keyboard()
+    if data == "help":
+        await cq.message.answer(
+            "Как оформить заказ:\n"
+            "1) Нажмите «Сделать заказ»\n"
+            "2) Отправьте контакт или введите номер\n"
+            "3) Введите адрес доставки\n"
+            "4) Напишите список товаров\n\n"
+            "После отправки заказа админ или курьер свяжется с вами."
         )
-        await callback.answer()
+        await cq.answer()
         return
 
-    # иначе считаем, что это product_id (старый поток оплаты)
-    product_id = data
-    product = products.get(product_id)
-    if not product:
-        await callback.answer("Товар не найден", show_alert=True)
-        return
+    await cq.answer()
 
-    user_data[callback.from_user.id] = {"product_id": product_id, "email": None}
-    await callback.message.answer(
-        f"Вы выбрали <b>{product['name']}</b> за {int(product['price'])}₽.\n\n"
-        "Введите ваш email или номер телефона для получения чека:\n\n"
-        "Пример: user@example.com или +79991234567"
-    )
-    await callback.answer()
-    return
-
+# --- Главный обработчик текстов/контактов ---
 @router.message()
-async def general_message_handler(message: Message):
+async def messages_handler(message: Message):
     uid = message.from_user.id
     text = (message.text or "").strip()
 
-    # ---------- 1) Обработка заказов (новый поток) ----------
+    # если пользователь в процессе заказа
     if uid in order_data:
-        state = order_data[uid]["state"]
+        state = order_data[uid].get("state")
 
-        # 1.1 ожидание контакта
+        # 1) ожидание контакта
         if state == "await_contact":
-            # если пришёл контакт (кнопка)
+            phone = None
+            # если пришёл контакт через кнопку
             if message.contact and message.contact.phone_number:
                 phone = message.contact.phone_number
             else:
-                # если просто текст — принимаем как номер, если валидный
-                if is_valid_phone(text):
+                # если текст — пробуем валидировать как телефон
+                if text and is_valid_phone(text):
                     phone = text
                 else:
-                    await message.answer("❗ Пожалуйста, отправьте контакт через кнопку или введите номер в формате +7999XXXXXXX.")
+                    await message.answer("❗ Пожалуйста, отправьте контакт через кнопку или введите номер в формате +79991234567.")
                     return
             order_data[uid]["phone"] = phone
             order_data[uid]["state"] = "await_address"
-            await message.answer("📍 Отлично! Пришлите, пожалуйста, адрес доставки (улица, дом, подъезд, этаж).", reply_markup=ReplyKeyboardRemove())
+            await message.answer("📍 Отлично. Теперь напишите адрес доставки (улица, дом, подъезд, этаж).", reply_markup=ReplyKeyboardRemove())
             return
 
-        # 1.2 ожидание адреса
+        # 2) ожидание адреса
         if state == "await_address":
             if not text:
-                await message.answer("❗ Введите адрес текстом.")
+                await message.answer("❗ Введите адрес текстом (например: ул. Ленина, д. 15, кв. 3, подъезд 2).")
                 return
             order_data[uid]["address"] = text
             order_data[uid]["state"] = "await_items"
-            await message.answer("🛒 Теперь пришлите список товаров (пример: хлеб, молоко, яйца). Укажите максимально подробно.")
+            await message.answer("🛒 Напишите список товаров (пример: хлеб, молоко, яйца). Указывайте подробно.")
             return
 
-        # 1.3 ожидание списка товаров
+        # 3) ожидание списка товаров
         if state == "await_items":
             if not text:
                 await message.answer("❗ Введите список товаров текстом.")
                 return
             order_data[uid]["items"] = text
 
-            # Сформируем сообщение подтверждения и отправим всем админам
+            # Формируем сообщение для админов
             user = message.from_user
-            user_name = f"{user.full_name}" if user.full_name else f"User {uid}"
+            user_name = user.full_name or "Клиент"
             username = f"@{user.username}" if user.username else "—"
 
             order_text = (
@@ -164,163 +198,41 @@ async def general_message_handler(message: Message):
                 f"📱 Телефон: {order_data[uid]['phone']}\n"
                 f"📍 Адрес: {order_data[uid]['address']}\n"
                 f"🛍 Список товаров:\n{order_data[uid]['items']}\n\n"
-                "— Отвечать клиенту можно прямо в Telegram (нажать на ник/номер)."
+                "— Ответить клиенту можно прямо в Telegram (нажать на ник/номер)."
             )
 
-            # отправляем всем админам
             admins_now = load_admins()
             if not admins_now:
-                await message.answer("❗ Заказ сформирован, но нет доступных администраторов для отправки. Свяжитесь с владельцем.")
+                await message.answer("✅ Заказ принят, но пока нет администраторов для отправки. Владелец должен добавить ваш ID в ADMIN_IDS.")
             else:
+                send_errors = False
                 for admin_id in admins_now:
                     try:
                         await bot.send_message(admin_id, order_text)
                     except Exception as e:
-                        logging.error(f"Ошибка отправки заказа админу {admin_id}: {e}")
+                        logging.error(f"Ошибка отправки админу {admin_id}: {e}")
+                        send_errors = True
 
-                await message.answer("✅ Спасибо! Ваш заказ отправлен. Скоро с вами свяжется курьер.")
-            # завершаем
-            del order_data[uid]
+                if send_errors:
+                    await message.answer("⚠ Ваш заказ принят, но возникли ошибки при отправке админам. Попробуйте позже.")
+                else:
+                    await message.answer("✅ Спасибо! Ваш заказ отправлен. Скоро с вами свяжется курьер.")
+
+            # удаляем состояние
+            order_data.pop(uid, None)
             return
 
-    # ---------- 2) Обработка старого потока оплаты (если пользователь начал покупку цифрового товара) ----------
-    # Если пользователь в процессе покупки (user_data есть и email ещё не задан)
-    if uid in user_data and user_data[uid].get("email") is None:
-        contact = text
-        if is_valid_email(contact):
-            contact_type = "email"
-        elif is_valid_phone(contact):
-            contact_type = "phone"
-        else:
-            await message.answer("❌ Введите корректный email или номер телефона (пример: user@example.com или +79991234567).")
-            return
-
-        user_data[uid]["email"] = contact
-        product_id = user_data[uid]["product_id"]
-        product = products[product_id]
-        bot_info = await bot.get_me()
-
-        receipt_customer = {contact_type: contact}
-
-        payment_data = {
-            "amount": {
-                "value": f"{product['price']:.2f}",
-                "currency": "RUB"
-            },
-            "confirmation": {
-                "type": "redirect",
-                "return_url": f"https://t.me/{bot_info.username}"
-            },
-            "capture": True,
-            "description": f"{uid}:{product_id}",
-            "receipt": {
-                "customer": receipt_customer,
-                "items": [
-                    {
-                        "description": product["name"][:128],
-                        "quantity": "1.00",
-                        "amount": {
-                            "value": f"{product['price']:.2f}",
-                            "currency": "RUB"
-                        },
-                        "vat_code": 1
-                    }
-                ],
-                "tax_system_code": 1
-            }
-        }
-
-        logging.info(f"Создаём платёж с данными: {payment_data}")
-
-        response = requests.post(
-            "https://api.yookassa.ru/v3/payments",
-            json=payment_data,
-            auth=(str(SHOP_ID), SECRET_KEY),
-            headers={
-                "Idempotence-Key": str(uuid.uuid4()),
-                "Content-Type": "application/json"
-            }
-        )
-
-        try:
-            data = response.json()
-        except Exception:
-            data = {}
-
-        if response.ok and "confirmation" in data:
-            url = data["confirmation"]["confirmation_url"]
-            pay_button = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Оплатить", url=url)]
-            ])
-            await message.answer(
-                f"🔗 Для оплаты <b>{product['name']}</b> на сумму {int(product['price'])}₽ нажмите кнопку ниже.\n\n"
-                "После оплаты вы получите ссылку для скачивания.",
-                reply_markup=pay_button
-            )
-        else:
-            logging.error(f"❌ Ошибка от YooKassa: {response.status_code} — {response.text}")
-            err_desc = data.get("description", "Нет описания ошибки")
-            await message.answer(f"❌ Ошибка при создании оплаты:\n\n{err_desc}")
-
-        return
-
-    # ---------- 3) Остальные сообщения (не в потоке) ----------
-    # Можно отвечать или игнорировать
-    # Например: подсказка меню
+    # если сообщение не в потоке — даём подсказку
     if text:
         await message.answer("Чтобы оформить заказ — нажмите /start и затем кнопку «Сделать заказ».")
-    return
 
-# --- YooKassa webhook (оставил как было) ---
-async def yookassa_webhook_handler(request):
-    data = await request.json()
-    logging.info(f"📩 Уведомление от YooKassa: {data}")
-
-    event = data.get("event")
-    obj = data.get("object", {})
-    status = obj.get("status")
-    description = obj.get("description", "")
-
-    if event == "payment.succeeded" and status == "succeeded":
-        try:
-            user_id_str, product_id = description.split(":")
-            user_id = int(user_id_str)
-            product = products.get(product_id)
-            if product:
-                link = download_links.get(product_id)
-                if link:
-                    await bot.send_message(
-                        user_id,
-                        f"✅ Оплата прошла!\n\n📥 Вот ссылка для скачивания <b>{product['name']}</b>:\n\n{link}"
-                    )
-                else:
-                    await bot.send_message(user_id, "✅ Оплата получена, но ссылка не найдена.")
-            else:
-                await bot.send_message(user_id, "✅ Оплата получена, но товар не найден.")
-            user_data.pop(user_id, None)
-        except Exception as e:
-            logging.error(f"Ошибка при обработке платежа: {e}")
-    return web.Response(text="ok")
-
-async def root_handler(request):
-    return web.json_response({"status": "ok", "message": "Бот работает!"})
-
-async def telegram_webhook_handler(request: web.Request):
-    try:
-        data = await request.json()
-        update = types.Update(**data)
-        await dp.feed_update(bot, update)
-    except Exception as e:
-        logging.error(f"Ошибка при обработке Telegram-обновления: {e}")
-    return web.Response(text="ok")
-
-# --- Команды админа: add/del/list ---
+# --- Команды админов: add/del/list ---
 @router.message(Command("addadmin"))
-async def add_admin_handler(message: Message):
-    from_user = message.from_user.id
+async def cmd_addadmin(message: Message):
+    caller = message.from_user.id
     admins_now = load_admins()
-    if from_user not in admins_now:
-        await message.reply("❌ Только администратор может добавлять новых админов.")
+    if caller not in admins_now:
+        await message.reply("❌ Только существующий админ может добавлять новых админов.")
         return
 
     parts = (message.text or "").split()
@@ -330,10 +242,10 @@ async def add_admin_handler(message: Message):
     try:
         new_id = int(parts[1])
     except:
-        await message.reply("Неверный ID. Это должно быть число.")
+        await message.reply("Неверный ID — должно быть число.")
         return
     if new_id in admins_now:
-        await message.reply("Этот пользователь уже в списке администраторов.")
+        await message.reply("Этот пользователь уже админ.")
         return
     admins_now.append(new_id)
     if save_admins(admins_now):
@@ -342,24 +254,24 @@ async def add_admin_handler(message: Message):
         await message.reply("❌ Ошибка при сохранении списка админов.")
 
 @router.message(Command("deladmin"))
-async def del_admin_handler(message: Message):
-    from_user = message.from_user.id
+async def cmd_deladmin(message: Message):
+    caller = message.from_user.id
     admins_now = load_admins()
-    if from_user not in admins_now:
-        await message.reply("❌ Только администратор может удалять админов.")
+    if caller not in admins_now:
+        await message.reply("❌ Только админ может удалять админов.")
         return
 
     parts = (message.text or "").split()
     if len(parts) < 2:
-        await message.reply("Использование: /deladmin <user_id>\nПример: /deladmin 123456789")
+        await message.reply("Использование: /deladmin <user_id>")
         return
     try:
         rem_id = int(parts[1])
     except:
-        await message.reply("Неверный ID. Это должно быть число.")
+        await message.reply("Неверный ID.")
         return
     if rem_id not in admins_now:
-        await message.reply("Этот пользователь не найден в списке админов.")
+        await message.reply("Этот пользователь не в списке админов.")
         return
     admins_now = [a for a in admins_now if a != rem_id]
     if save_admins(admins_now):
@@ -368,24 +280,36 @@ async def del_admin_handler(message: Message):
         await message.reply("❌ Ошибка при сохранении списка админов.")
 
 @router.message(Command("admins"))
-async def list_admins(message: Message):
+async def cmd_list_admins(message: Message):
     admins_now = load_admins()
     if not admins_now:
         await message.reply("Список админов пуст.")
         return
     await message.reply("Список админов:\n" + "\n".join([str(x) for x in admins_now]))
 
-# --- Веб-сервер и запуск ---
-async def on_startup(app):
-    webhook_url = os.getenv("WEBHOOK_URL") or WEBHOOK_URL
-    if not webhook_url:
-        logging.error("❗ WEBHOOK_URL не задан")
-        return
+# --- Webhook / сервер (для Render) ---
+async def telegram_webhook_handler(request: web.Request):
     try:
-        await bot.set_webhook(webhook_url)
-        logging.info(f"✅ Webhook установлен: {webhook_url}")
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.feed_update(bot, update)
     except Exception as e:
-        logging.error(f"Не удалось установить webhook: {e}")
+        logging.error(f"Ошибка при обработке Telegram-обновления: {e}")
+    return web.Response(text="ok")
+
+async def root_handler(request):
+    return web.json_response({"status":"ok","message":"bot running"})
+
+async def on_startup(app):
+    webhook = os.getenv("WEBHOOK_URL") or (WEBHOOK_URL if 'WEBHOOK_URL' in globals() else None)
+    if webhook:
+        try:
+            await bot.set_webhook(webhook)
+            logging.info(f"Webhook установлен: {webhook}")
+        except Exception as e:
+            logging.error(f"Не удалось установить webhook: {e}")
+    else:
+        logging.info("WEBHOOK_URL не указан — бот ожидает обновлений (можно использовать long-polling локально)")
 
 async def on_cleanup(app):
     try:
@@ -396,7 +320,6 @@ async def on_cleanup(app):
 
 def setup_web_app():
     app = web.Application()
-    app.router.add_post("/yookassa-webhook", yookassa_webhook_handler)
     app.router.add_post("/webhook", telegram_webhook_handler)
     app.router.add_get("/", root_handler)
     app.on_startup.append(on_startup)
@@ -404,13 +327,13 @@ def setup_web_app():
     return app
 
 async def main():
-    port = int(os.getenv("PORT", PORT))
+    port = int(os.getenv("PORT", PORT if 'PORT' in globals() else 3000))
     app = setup_web_app()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info(f"🚀 Сервер запущен на порту {port}")
+    logging.info(f"Server started on port {port}")
     while True:
         await asyncio.sleep(3600)
 
