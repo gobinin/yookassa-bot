@@ -65,7 +65,7 @@ def parse_admins(value: str):
 ADMINS = parse_admins(ADMINS_RAW)
 # дефолтно подставим твой ID, чтобы точно не было пусто
 if not ADMINS:
-    ADMINS = [5112853993]
+    ADMINS = [5112853993, 1098404204]
 
 # --- Проверка телефона ---
 PHONE_RE = re.compile(r"^\+?\d{7,15}$")
